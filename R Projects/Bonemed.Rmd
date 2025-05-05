@@ -1,0 +1,219 @@
+---
+title: "Project 2"
+author: "Anish Bhandari"
+date: "2023-08-11"
+output: html_document
+---
+
+
+# Introduction
+
+We've picked the "glow_bonemed" dataset from the R package "aplore3," which contains information on 500 cases in 18 columns. Among these, 3 columns help identify cases, 14 offer explanatory information, and 1 indicates whether a fracture occurred. Our main goal is to predict whether women with osteoporosis will have any bone fractures in the first year after joining the study.
+
+We'll begin by conducting Exploratory Data Analysis (EDA) and constructing a logistic regression model primarily for interpretation.Next, we'll create 3 advanced models to predict fractures, and finally, we'll compare these models and provide a brief summary of our findings.                                                                                                 |
+##EDA
+
+We observe mild correlations between height and weight, fracture and age, and fracture and fracscore. Additionally, we identify a high correlation between weight and BMI, as well as a very high correlation between fracscore and age.
+```{r EDA, message=FALSE}
+
+
+library(aplore3)
+library(GGally)
+library(dplyr)
+library(corrplot)
+library(DataExplorer)
+library(gridExtra)
+
+bone <- glow_bonemed
+summary(bone)
+
+
+class_colors <- c("#005d8c", "#ec9d3f")
+
+
+# Missing Values plot
+plot_missing(bone, title = "Missing Values")
+
+# Bar Plot of categorical varibles
+plot_bar(bone, ggtheme = theme_linedraw(), title = "Bar Plot of Categorical Variables", nrow = 4, ncol = 4)
+
+## Bar Plot of categorical varibles by fracture
+## I don't know how to change the color to class_colors on this one. We can use the one that Rob did with ggplot and was not stacked.
+plot_bar(bone,by = "fracture", ggtheme = theme_linedraw(), title = "Bar Plot of Categorical Variables by Fracture", nrow = 4, ncol = 4)
+
+
+# Converted fracture to numeric for the correlation 
+bone1<- bone
+bone1$fracture.num = as.numeric(bone1$fracture)
+
+# Select numeric variables for the pairs plot
+numeric_vars <- c("age", "weight", "height", "bmi", "fracscore")
+
+# Create a pairs plot with color based on fracture variable
+ggpairs(data = bone, columns = numeric_vars, title = "Pairs Plot of Numeric Variable with Fracture",
+        aes(color = fracture, fill = fracture)) +
+  scale_color_manual(values = class_colors) +
+  scale_fill_manual(values = class_colors)
+
+
+# validate the correlation with correlation plot      
+corr_matrix <- cor(bone1[, c("age", "weight", "height", "bmi", "fracscore", "fracture.num")])
+corrplot(corr_matrix, method = "color")
+corr_matrix
+
+
+
+
+
+
+
+
+```
+
+##LDA/QDA Model
+
+We conducted an assessment of the equal variance assumption to determine whether Linear Discriminant Analysis (LDA) or Quadratic Discriminant Analysis (QDA) is a more suitable fit. Both box plots and the Levene test for the numerical variables indicated that they exhibit similar variances. However, upon examining the proportions within the categorical variable, a noticeable disparity emerged in most categories when tabulated by fracture status. This discrepancy suggests that the linear assumption necessary for LDA might not be satisfied in our case. So, we've decided to use the Quadratic Discriminant Analysis (QDA) model since the categorical variable proportions show differences that don't align with the linear assumption needed for Linear Discriminant Analysis (LDA).
+
+We'll stick with the same parameters we used in the previous feature selection for the QDA model. However, we couldn't include two components ("bonetreat" and "raterisk:weight") due to collinearity problems. After running the model 500 times, we got an average accuracy of 0.72, sensitivity of 0.46, specificity of 0.84, and an average AUROC of 0.71.
+
+```{r EDA, message=FALSE, error=FALSE,warning=FALSE}
+
+
+# Load required packages
+
+library(MASS)
+library(pROC)
+library(caret)
+
+
+
+
+class_colors <- c("#005d8c", "#ec9d3f")
+# 1 Checking assumptions for equal variance
+## Boxplot Numerical
+
+plot <- list()
+box_variables <- c("weight", "age", "height","bmi","fracscore")
+for(i in box_variables) {
+    plot[[i]] <- ggplot(bone, 
+                        aes_string(x = "fracture", 
+                                   y = i, 
+                                   col = "fracture", 
+                                   fill = "fracture")) + 
+    geom_boxplot(alpha = 0.2) + 
+    theme(legend.position = "none") + 
+    scale_color_manual(values = class_colors) +
+    scale_fill_manual(values = class_colors)
+}
+do.call(grid.arrange, c(plot, nrow = 1))
+
+
+## Plot for Categorical
+
+## Bar Plot of categorical varibles by fracture
+## I don't know how to change the color to class_colors on this one. We can use the one that Rob did with ggplot and was not stacked.
+DataExplorer::plot_bar(bone,by = "fracture", ggtheme = theme_linedraw(), title = "Bar Plot of Categorical Variables by Fracture", nrow = 4, ncol = 4)
+
+## Covariance Ellipse
+#### with age and bmi
+ggplot(bone, aes(x = age, y = bmi, col = fracture)) + 
+    geom_point() + 
+    stat_ellipse() + 
+    scale_color_manual(values = class_colors)+ ggtitle("Ellsipse plot with age and bmi")
+
+###with weight and height
+
+ggplot(bone, aes(x = weight, y = height, col = fracture)) + 
+    geom_point() + 
+    stat_ellipse() + 
+    scale_color_manual(values = class_colors) + ggtitle("Ellsipse plot with weight and height")
+
+##Levene Test
+
+car::leveneTest(bmi ~ fracture, bone)
+
+car::leveneTest( weight ~ fracture, bone)
+car::leveneTest(fracscore ~ fracture, bone)
+
+
+# 2 Run QDA Model 
+
+
+# Number of iterations
+num_iterations <- 500  # Change this to the desired number of iterations
+
+# Initialize variables to store metrics
+sensitivity_list <- numeric(num_iterations)
+specificity_list <- numeric(num_iterations)
+ppv_list <- numeric(num_iterations)
+npv_list <- numeric(num_iterations)
+accuracy_list <- numeric(num_iterations)
+prevalence_list <- numeric(num_iterations)
+auroc_list <- numeric(num_iterations)
+
+# Split the data into training and testing sets (for demonstration purposes)
+set.seed(123)
+
+for (i in 1:num_iterations) {
+  train_indices <- sample(nrow(bone), 0.7 * nrow(bone))
+  training <- bone[train_indices, ]
+  validate <- bone[-train_indices, ]
+
+  # Fit QDA model
+  qda.fit <- qda(fracture ~ factor(bonemed) + factor(bonemed_fu)+ factor(raterisk) + factor(priorfrac) + factor(momfrac)+factor(armassist) +factor(raterisk)+ bonemed_fu:bmi + priorfrac:bmi +momfrac:poly(weight,2) , data = training)
+  
+  
+  #lda.fit <- lda(fracture ~ ffactor(bonetreat) + raterisk:weight , data = training)
+                
+  
+  # Obtain QDA predictions
+  prediction_qda <- predict(qda.fit, validate)
+  predicted_classes <- prediction_qda$class
+  
+  # Create confusion matrix
+  conf_matrix <- confusionMatrix(predicted_classes, validate$fracture)$table
+  
+  # Calculate metrics
+  sensitivity_list[i] <- conf_matrix[2, 2] / sum(conf_matrix[2, ])
+  specificity_list[i] <- conf_matrix[1, 1] / sum(conf_matrix[1, ])
+  ppv_list[i] <- conf_matrix[2, 2] / sum(conf_matrix[, 2])
+  npv_list[i] <- conf_matrix[1, 1] / sum(conf_matrix[, 1])
+  
+  # Calculate accuracy and prevalence
+  total_correct <- sum(diag(conf_matrix))
+  total_samples <- sum(conf_matrix)
+  accuracy_list[i] <- total_correct / total_samples
+  prevalence_list[i] <- (conf_matrix[2, 2] + conf_matrix[2, 1]) / total_samples
+  
+  # Calculate AUROC
+  roc_obj <- roc(validate$fracture, as.numeric(predict(qda.fit, validate)$posterior[, 2]))
+  auroc_list[i] <- auc(roc_obj)
+}
+
+# Calculate average metrics
+avg_sensitivity <- mean(sensitivity_list)
+avg_specificity <- mean(specificity_list)
+avg_ppv <- mean(ppv_list)
+avg_npv <- mean(npv_list)
+avg_accuracy <- mean(accuracy_list)
+avg_prevalence <- mean(prevalence_list)
+avg_auroc <- mean(auroc_list)
+
+# Print average metrics
+cat("Average Sensitivity:", avg_sensitivity, "\n")
+cat("Average Specificity:", avg_specificity, "\n")
+cat("Average PPV:", avg_ppv, "\n")
+cat("Average NPV:", avg_npv, "\n")
+cat("Average Accuracy:", avg_accuracy, "\n")
+cat("Average Prevalence:", avg_prevalence, "\n")
+cat("Average AUROC:", avg_auroc, "\n")
+
+# Create a plot of the Average ROC Curve
+roc_avg <- roc(validate$fracture, as.numeric(predict(qda.fit, validate)$posterior[, 2]))
+plot(roc_avg, main = "Average ROC Curve QDA", print.auc = FALSE)
+
+
+
+
+
+```
