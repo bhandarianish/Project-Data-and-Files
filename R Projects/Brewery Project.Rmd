@@ -1,0 +1,460 @@
+---
+title: "Beers and Breweries Analysis"
+author: "Anish Bhandari & Carolina Craus"
+date: "2022-10-04"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+The main objective of this analysis is to add value to Budweiser company
+through our exploratory data analysis. We have discovered several
+interesting opportunities throughout this study. We are positive that
+this analysis will enhance Budweiser's strategic decision making and
+open a few doors for future opportunities.
+
+The goal of this analysis is to assess the beer and brewery market data
+given to us by Budweiser Breweries and assist with the preliminary data
+collection, exploratory data analysis, and analysis to identify trends
+and provide advice on opportunities for a new business proposal.
+
+**Datasets**
+
+1.  Beers.csv: The Beers dataset contains 2,410 beers that are being
+    produced in the United States along with metrics for ABV (Alcohol by
+    Volume), IBU (International Bitterness Units), Style, and ounces and
+    includes the Brewery ID associated with that beer.
+2.  Breweries.csv: The Breweries dataset contains 558 Breweries in the
+    United States along with the Brewery ID (which matches with the one
+    from the Beers dataset) and which city and state it is located in.
+
+### Preliminary Data Collection & Cleaning
+
+```{r }
+# Importing and Cleaning the data 
+Beer <- read.csv("https://raw.githubusercontent.com/BivinSadler/MSDS_6306_Doing-Data-Science/Master/Unit%208%20and%209%20Case%20Study%201/Beers.csv",header = TRUE)
+
+Brewery <- read.csv("https://raw.githubusercontent.com/BivinSadler/MSDS_6306_Doing-Data-Science/Master/Unit%208%20and%209%20Case%20Study%201/Breweries.csv", header = TRUE)
+
+colnames(Beer)[5]="Brew_ID"# Renamed Brewery_id to Brew_ID so that it has the same name in both the dataframe. This will help us merge by the brewery identification
+colnames(Brewery)[2] = "Brewery_Name"
+
+# Question # 2 Merge the beer data with brewery data
+beerfinal <- merge(Beer,Brewery,by.x = "Brew_ID", by.y = "Brew_ID" ) # outer merged the 2 dataframes by brewery identification
+beerfinal$State <- as.factor(beerfinal$State) # changed state into factor
+beerfinal$Style <- as.factor(beerfinal$Style) # changed beer style into a factor so that it can be grouped
+beerfinal$Brewery <- as.factor(beerfinal$Brewery_Name) 
+
+
+
+```
+
+### Load Libraries
+
+```{r}
+library(usmap)
+library(ggplot2)
+library(dplyr) # pipe function
+library(GGally)
+library(maps)
+library(mapproj)
+library(usdata)
+library(stringi)
+library(ggpubr)
+
+
+```
+
+## Exploratory Data Analysis
+
+### 1. Breweries by State
+
+Every state has at least 2 brewery, ranging from 2 (Delaware and West
+Virginia) to 265 (Colorado).Washington DC also has one brewery which has
+been excluded from the heat map as DC is not a state. The median
+breweries across the state is 27.Regionally, West has the most breweries
+with Colorado, California and Oregon in top 6.Midwest is close second
+with Michigan, Indiana, Illinois, and Wisconsin in top 10.
+
+```{r}
+
+#head(beerfinal)
+#summary(beerfinal)
+#colnames(beerfinal)
+# In order to use the maps and usdata libraray, we need to remove one brewery which is in DC
+grep("DC",beerfinal$State,ignore.case = TRUE) 
+beerfinal[1286:1293,]
+beerfinal_wodc = beerfinal[-(1286:1293),]
+grep("DC",beerfinal_wodc$abb,ignore.case = TRUE) 
+
+# remove 1 factor level of Dc to match the map
+beerfinal_wodc$State <- factor(beerfinal_wodc$State, exclude = "DC") # remove 1 factor level of Dc to match the map
+beerfinal_wodc$State = as.factor(beerfinal_wodc$State)
+
+
+#makes a data frame with State name and abbreviation
+lookup = data.frame(abb = state.abb, State = state.name)
+
+# used stri_sub function to remove a "space" in front of the state abbreviations
+beerfinal_wodc$State = stri_sub(beerfinal_wodc$State,-2)
+
+#changed state to lower case so that it can be used to match the location(longitude,latitude)
+beerfinal_wodc$State = tolower(abbr2state(beerfinal_wodc$State))
+
+# ake one data set with state names and abb
+beerheatData = count(beerfinal_wodc,State) #count up the occurrence of each state. 
+
+
+colnames(beerheatData)[2] = "Breweries" #change "n" to "Breweries"
+colnames(beerheatData)[1] = "region" # changed the 1st column to "region"
+
+# Arrange the States by Breweries
+beerheatData1 = arrange(beerheatData,desc(Breweries)) 
+
+#This shows the number of brewery excluding 1 in DC
+beerheatData1
+#summary(beerheatData1)
+
+# Generating a heat map
+states <- map_data("state")
+map.df <- merge(states,beerheatData, by="region", all.x=T)
+map.df <- map.df[order(map.df$order),]
+ggplot(map.df, aes(x=long,y=lat,group=group))+
+  geom_polygon(aes(fill=Breweries))+
+  geom_path()+ 
+  scale_fill_gradientn(colours=rev(heat.colors(10)),na.value="grey90")+ggtitle("No. of Breweries by State(excluding DC)")+
+  coord_map()
+  
+```
+
+### 2. First 6 observations & last 6 observations of merged file
+
+Merging was done in the first section. Observations are shown below.
+
+```{r}
+head(beerfinal, n=6)
+tail(beerfinal,n=6)
+
+
+```
+
+### 3. Missing Values
+
+We can see that there are 62 missing values in ABV (2.57%) and 1005 in
+IBU (41.7%). We are not going to delete the missing values as we may
+have to do data analysis on individual properties. We will use filter na
+function to study any relations in future.
+
+```{r}
+summary(beerfinal)
+#colSums(is.na(beerfinal))
+```
+
+```{r}
+colMeans(is.na(beerfinal)) * 100
+
+```
+
+### 4. Median Alcohol & Bitterness
+
+The median IBU is highest in Maine(61) followed by West Virginia(57.5)
+and Florida(55). The lowest median IBU is in Wisconsin (19) followed by
+Kansas(20), and Arizona(20.5). The median highest ABV is in Washington
+DC and Kentucky(6.25%) closely followed by a 3 way tie between Michigan,
+New Mexico, and West Virginia(6.2%). The lowest median ABV is in Utah
+(4%) followed by New Jersey(4.6%).The low ABV in Utah is due to the
+state regulation, where only 4% ABV was allowed in grocery stores.
+However, this law changed in 2019 and currently grocery stores in Utah
+can sell up-to 5% ABV.
+
+```{r}
+# 4 Median Alcohol and Bitterness Unit by State
+#calculating Median for IBU
+sumdata = beerfinal %>% filter(!is.na(beerfinal$IBU)) %>% group_by(State)%>% summarise(Mean=mean(IBU), Max=max(IBU), Min=min(IBU), Median=median(IBU), Std=sd(IBU))
+sumdata1 = arrange(sumdata,desc(Median))
+print (sumdata1, n=51)
+
+# Median Distribution of IBU by US States
+sumdata %>% ggplot(aes(x=reorder(State,-Median), y=Median)) + geom_bar(stat = "identity",width = 0.5) + xlab("US States") + ylab("IBU Median") + ggtitle("Median Distribution of IBU by US States") + theme(text = element_text(size=10),axis.text.x = element_text(angle=90, hjust=1)) 
+
+
+
+#calculating Median for ABV
+sumdataabv = beerfinal %>% filter(!is.na(beerfinal$ABV)) %>% group_by(State)%>% summarise(Mean=mean(ABV), Max=max(ABV), Min=min(ABV), Median=median(ABV), Std=sd(ABV))
+sumdataabv = arrange(sumdataabv,desc(Median))
+print(sumdataabv, n=51)
+
+# Median Distribution of ABV by US States
+
+sumdataabv %>% ggplot(aes(x=reorder(State,-Median), y=Median)) + geom_bar(stat = "identity",width =0.5) + xlab("US States") + ylab("ABV Median") + ggtitle("Median Distribution of ABV by US States") + theme(text = element_text(size=10),axis.text.x = element_text(angle=90, hjust=1))
+```
+
+### 5. Maximum IBU & ABV
+
+The maximum ABV(12.8%) is Lee Hill Series Vol.5 beer from Upslope
+Brewing Company in Boulder, Colorado. The maximum IBU (138) is Bitter
+Bitch Imperial beer from Astoria Brewing Company located in Astoria,
+Oregon.
+
+```{r}
+sumdata2 = arrange(sumdata,desc(Max))
+head(sumdata2)
+max_abv = beerfinal[which.max(beerfinal$IBU),]
+max_abv
+
+sumdataabv2 = arrange(sumdataabv,desc(Max))
+head(sumdataabv2)
+most_bitter = beerfinal[which.max(beerfinal$ABV),]
+most_bitter
+
+```
+
+### 6. Summary of ABV
+
+The ABV distribution is right skewed with the tail around 7 to 10 %.
+There are number of factors which causes this skeweness. Some states
+require higher alcohol beer to only be sold in liquor stores. This
+causes breweries to restrict alcohol percent by stopping the
+fermentation early.Another factor is the cost associated with higher
+alcohol. Higher alcohol, in general, costs higher to produce due to the
+higher fermentation time and extra raw materials.
+
+```{r}
+# 6 Summary of ABV
+
+summary(beerfinal$ABV)
+beerfinal %>% ggplot(aes(x=ABV)) + geom_histogram()+ xlab("Alcohol by Volume(ABV)") + ylab("Frequency of ABV")+ ggtitle("Alcohol by Volume Distribution")
+
+```
+
+### 7. Relationship between ABV & IBU
+
+The correlation coefficient between IBU and ABV is 0.67. This evidence
+suggests that there is a positive correlation between IBU and ABV. A
+correlation below and over the median IBU(35) was also run. The
+relationship gets worse at lower IBU (IBU \<35, R=0.25) and comparable
+when IBU is higher (IBU \< 35, R = 0.64). There is an opportunity to
+optimize the relationship based on the style of beer.
+
+```{r}
+
+# 7 Relationship between ABV and IBU using Scatterplot
+beerfinal %>% filter(!is.na(beerfinal$ABV) & !is.na(beerfinal$IBU)) %>% ggplot(aes(x=IBU, y=ABV))+ geom_point() + geom_smooth(method="lm") + stat_cor(p.accuracy = 0.001) + ggtitle("Relationship between International Bitterness Unit(IBU) \n& Alcohol % by Volume (ABV)")
+
+# Relationship between ABV and IBU using Scatterplot with IBU < & > 35 (Median IBU)
+beerfinal %>% filter(!is.na(beerfinal$ABV) & !is.na(beerfinal$IBU) & IBU < 35) %>% ggplot(aes(x=IBU, y=ABV))+ geom_point() + geom_smooth(method="lm") + stat_cor(p.accuracy = 0.001) + ggtitle("Relationship between International Bitterness Unit(IBU) \n& Alcohol % by Volume (ABV) with IBU < 35 ")
+
+
+beerfinal %>% filter(!is.na(beerfinal$ABV) & !is.na(beerfinal$IBU) & IBU > 35) %>% ggplot(aes(x=IBU, y=ABV))+ geom_point() + geom_smooth(method="lm") + stat_cor(p.accuracy = 0.001) + ggtitle("Relationship between International Bitterness Unit(IBU) \n& Alcohol % by Volume (ABV) with IBU > 35 ")
+
+```
+
+## 8. Classification of IPA & ALE Using KNN
+
+### Filter & Clean data
+
+```{r}
+library(dplyr)
+library(caret)
+library(class)
+# filtering IPA & Ale style beers only 
+both_df  <- dplyr::filter(beerfinal, grepl('IPA|Ale', beerfinal$Style))
+sum(is.na(both_df))
+
+# normalize beer style -- add type column for classification
+both_df$Type <- if_else(grepl('IPA', both_df$Style), "IPA", "ALE")
+head(both_df)
+
+# remove missing values
+both_clean <- remove_missing(both_df)
+```
+
+### KNN Model
+
+```{r}
+
+# split of 70/30 for training and test sets 
+set.seed(6)
+splitPerc = .70
+iterations = 100 
+numks = 10 
+
+# randomly split the train and test sets
+
+  
+masterAcc = matrix(nrow = iterations, ncol=numks)
+
+# using only IBU & ABV values & Style as the class against which knn will search 
+# iterate through 100 values of k to hypertune the k parameter
+for (j in 1:iterations) {
+  trainIndices = sample(1:dim(both_clean)[1], round(splitPerc * dim(both_clean)[1]))
+  train = both_clean[trainIndices,]
+  test = both_clean[-trainIndices,]
+  for (i in 1:numks) {
+    classifications = knn(train[,c(4,5)], test[,c(4,5)], train$Type, prob=TRUE, k=i)
+    table(classifications, test$Type)
+    CM = confusionMatrix(table(classifications,test$Type)) # confusion matrix
+    masterAcc[j, i] = CM$overall[1]
+  }
+}
+
+MeanAcc = colMeans(masterAcc)
+
+
+# plot the Mean knn value
+plot(seq(1, numks, 1), MeanAcc, type="l")
+which.max(MeanAcc)
+max(MeanAcc)
+
+
+```
+
+Using knn classification to explore the relationship between ABV and IBU
+and test whether we can accurately classify a beer as an IPA or an ALE
+using these two metrics. Iterating through values of k from a range of 1
+to 10, we can see from a visual inspection of the plot that the most
+optimal value for k is 5. This tells us we will be looking at the 5
+nearest neighbors ABV & IBU values of a specified beer in order to
+determine its classification.
+
+### Confusion Matrix
+
+```{r}
+CM
+```
+
+The confusion matrix and model statistics above is calculated from our
+predictions using the k-nn classifier with k=5 and tells us our model
+had an Accuracy of 86% in predicting the correct classification of beer,
+which is adequate for a classification model, but there are
+opportunities for optimization we can explore. The confusion matrix also
+tells us that 147 Ales were predicted correctly and 13 ales were
+predicted incorrectly (91.9% accuracy for Ales) and 97 IPAs were
+predicted correctly and 26 IPAs incorrectly (86.2% accuracy of IPAs).
+
+### Scatterplot of KNN Results
+
+The scatter plot of the predicted values of Ale & IPA based on their IBU
+& ABV shows us that there is a strong relationship between IBU & ABV and
+the classification of Ale or IPA. As we can see, our prediction lines
+for both Ales and IPas follows their respective data points well. As can
+be seen from the plot, the Ale Threshold for IBU is below around 50
+units and for ABV it is below around 6%. The IPA Threshold for IBU is
+above around 60 units and for ABV it above around 6%. This shows us
+there
+
+```{r}
+# scatter plot of the predicted values of ALE & IPA based on their IBU & ABV
+test  %>% filter(!is.na(test$ABV) & !is.na(test$IBU))%>% ggplot(aes(x = ABV, IBU,color = Type)) + geom_point() + geom_smooth(method = "lm") + theme_dark() + xlab("Alcohol by Volume") + ylab("International Bitterness Unit")
+
+```
+
+```{r}
+# Naive Bayes 
+library(e1071)
+classifications_naive = naiveBayes(train[,c(4,5)], as.factor(train$Style))
+CM_nb = confusionMatrix(table(predict(classifications_naive,test[,c(4,5)]),as.factor(test$Style)))
+draw_confusion_matrix(CM_nb)
+```
+
+```{r}
+beerfinal <- data.frame(beerfinal[beerfinal$Category !='Other',])
+beerfinal
+beerfinal %>% filter(!is.na(beerfinal$ABV) & !is.na(beerfinal$IBU))%>% ggplot(aes(x=ABV, y=IBU, color = Category)) + geom_point(position = "jitter") + theme_dark()
+
+```
+
+```{r}
+set.seed(6)
+splitPerc=0.7
+
+trainIndices = sample(1:dim(both_clean)[1], round(splitPerc * dim(both_clean)[1]))
+train = both_clean[trainIndices,]
+test = both_clean[-trainIndices,]
+
+accuracies = data.frame(accuracy=numeric(100), k=numeric(100))
+
+for (i in 1:100) { 
+  classifications = knn(train[,c(4,5)], test[,c(4,5)], train$Type, prob=TRUE, k=i)
+  table(test$Type,classifications)
+  CM = confusionMatrix(table(test$Type,classifications))
+  accuracies$accuracy[i] = CM$overall[1]
+  accuracies$k[i] = i
+}
+
+accuracies$k
+accuracies$accuracy
+
+test$Result <- knn(train[,c(4,5)], test[,c(4,5)], train$Type, prob=TRUE, k=5)
+CM <- confusionMatrix(table(test$Type,classifications))
+CM
+
+```
+
+## 9. Focus on IPA and Acquisition
+
+### Background
+
+Budweiser's parent company is Anheuser-Busch. Anheuser-Busch owns
+various popular commercial brands such as Budweiser, Bud Light, Michelob
+Ultra, Natural Light etc. However, most are unaware of their acquisition
+of many microbreweries within US. Most of the bigger breweries such
+Anheuser-Busch, Miller, Coors etc have been strategically purchasing
+shares in microbreweries over the last 20 years or so, as popularity in
+microbreweries has grown. IPA is one of the most popular styles of beer
+in US. With this analysis, we will propose future microbrewery
+acquisition opportunities to the Budweiser's CEO and CFO, based on IPA's
+ABV and IBU.
+
+### Potential Future Acquisition
+
+Data collected from <https://www.anheuser-busch.com/brands/>
+
+We have collected most IPA brands from microbreweries owned by
+Anheuser-Busch. Our median ABV from this dataset is 6.9 % and IBU is 50.
+For comparison, the median ABV for IPA from our brewery data is 6.8% and
+IBU is 70. For potential acquisition, we filtered IPA with similar hop
+profile (picked 45 to 55 IBU with median 50 in the middle), slightly
+lower ABV (6.2 to median 6.9%, to find an efficient and cost effective
+beer). We came across 5 breweries using this filter. However, there are
+only 2 breweries that are not in the states that Anheuser-Busch
+operates. This is important for the new market penetration. The 2
+breweries are Big Wood Brewery in MN and Abita Brewing Company in LA. We
+believe that this analysis can supplement any future acquisition
+decision by Anheuser-Busch.
+
+```{r}
+#data manually transferred from website into a csv file
+AB_IPA = read.csv(file.choose(), header = TRUE)
+head(AB_IPA)
+summary(AB_IPA)
+
+### ABV and IBU(IPA only) from the Breweries dataset
+
+IPA_only <- dplyr::filter(both_clean, grepl('IPA', both_clean$Type))
+summary(IPA_only)
+valuebeer  <- IPA_only %>% filter(IBU > 45 & IBU < 55 &  ABV > 0.062 & ABV < 0.069)
+valuebeer
+```
+
+## Conclusion
+
+Based on this dataset, there is evidence to suggest that there is a
+linear positive relationship between Bitterness Unit and Alcohol.
+There's also evidence to suggest that this relationship differs across
+different type of beer. There is a big opportunity to optimize
+Bitterness Unit and Alcohol at the Budweiser breweries across US. This
+optimization can be enhanced further through knn model, which showed
+evidence of high accuracy in determining type of beer (IPA & Ale). The
+biggest opportunity for Anheuser-Busch and Budweiser is to create a
+model for micro brewery acquisition. We realize that there are multiple
+parameters important for acquisition and most of them are financial. The
+financial inputs can be paired alongside beer properties to create a
+strategic model for Anheuser-Busch's brewery acquisition.
